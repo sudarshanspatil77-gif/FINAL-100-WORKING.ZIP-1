@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>NIFTY BOT P&L Dashboard - Download PRO</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body { font-family: Arial; background: #0f172a; color: white; padding: 20px; }
+.card { background: #1e293b; padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+h1 { color: #22c55e; margin:0 0 20px 0; }
+h2 { color: #94a3b8; }
+table { width: 100%; border-collapse: collapse; font-size:13px; }
+th, td { padding: 8px 10px; border-bottom: 1px solid #334155; text-align: left; }
+th { color: #94a3b8; position: sticky; top:0; background:#1e293b; }
+.profit { color: #22c55e; font-weight: bold; }
+.loss { color: #ef4444; font-weight: bold; }
+.big { font-size: 32px; font-weight: bold; }
+.small { font-size:12px; color:#94a3b8; }
+.btn { background:#22c55e; color:black; padding:10px 20px; border-radius:8px; border:none; cursor:pointer; font-weight:bold; margin:5px 10px 5px 0; display:inline-block; }
+.btn-blue { background:#3b82f6; color:white; }
+.btn-orange { background:#f59e0b; color:black; }
+.btn-red { background:#ef4444; color:white; }
+.badge { padding:4px 10px; border-radius:20px; font-size:12px; font-weight:bold; }
+.badge-wait { background:#f59e0b; color:black; }
+.badge-ok { background:#22c55e; color:black; }
+.badge-skip { background:#475569; }
+.upload-area { border:2px dashed #334155; padding:15px; border-radius:10px; text-align:center; margin:10px 0; background:#0f172a; }
+input[type=file] { background:#0f172a; color:white; padding:8px; border-radius:6px; border:1px solid #334155; }
+canvas { background: #1e293b; border-radius: 12px; padding: 10px; }
+</style>
+</head>
+<body>
+<h1>📊 NIFTY BOT PRO - Dashboard + Download</h1>
+
+<div class="card">
+  <div>Total P&L Today: <span id="total" class="big">Rs.0</span> <span id="status" class="small"></span></div>
+  <div style="margin-top:10px">Total Signals: <span id="count" class="big">0</span> | Approved: <span id="wins" style="color:#22c55e">0</span> | Skipped: <span id="loss" style="color:#ef4444">0</span> | Awaiting: <span id="await" style="color:#f59e0b">0</span></div>
+  <div class="small" id="fileinfo" style="margin-top:10px">Auto loading...</div>
+  <div style="margin-top:12px">
+    <button class="btn" onclick="downloadCSV()">📥 Download P&L CSV</button>
+    <button class="btn btn-blue" onclick="downloadPDF()">📄 Download PDF Report</button>
+    <button class="btn btn-orange" onclick="downloadJSON()">📦 Download JSON</button>
+    <button class="btn btn-red" onclick="clearData()">🗑️ Clear Display</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>📁 Manual Upload (Chrome file:// block fix)</h2>
+  <div class="upload-area">
+    <p>Auto load hot nasel tar file select kara:</p>
+    <input type="file" id="fileInput" accept=".csv,.txt" multiple onchange="handleFiles(this.files)">
+    <div class="small">paper_signals.csv, trades_log.csv, pnl_today.txt</div>
+  </div>
+</div>
+
+<div class="card"><canvas id="pnlChart" height="90"></canvas></div>
+
+<div class="card">
+  <h2>Paper Signals - TREND HIGH-LOW FIB + W Pattern</h2>
+  <table id="tradeTable"><tr><th>Time</th><th>ID</th><th>Bias</th><th>Spot</th><th>Trend Hi/Lo</th><th>Fib 0.32/0.5/2.14</th><th>W Pattern</th><th>Status</th><th>Reason</th></tr></table>
+</div>
+
+<div class="card">
+  <h2>Old Trades Log</h2>
+  <table id="oldTable"><tr><th>Time</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Balance</th><th>TrailSL</th></tr></table>
+</div>
+
+<script>
+let allPaperRows=[], allOldRows=[], currentPnL=0;
+let chartInstance=null;
+
+async function loadCSVAuto(file){
+  try{
+    let r=await fetch(file+'?t='+Date.now());
+    if(!r.ok) return null;
+    return await r.text();
+  }catch(e){ return null; }
+}
+function parsePaper(text){
+  if(!text) return [];
+  let lines=text.trim().split('\n');
+  if(lines.length<=1) return [];
+  return lines.slice(1).map(l=>{
+    let p=l.split(',');
+    return {time:p[0]||'', id:p[1]||'', dir:p[2]||'', spot:p[3]||'', trend_hi:p[4]||'', trend_lo:p[5]||'', f32:p[6]||'', f50:p[7]||'', f214:p[8]||'', w_pat:p[9]||'', status:p[10]||'', reason:p[11]||'', strike:p[12]||'', otype:p[13]||'', entry:p[14]||'', exit:p[15]||'', pnl:parseFloat(p[16]||0), raw:l};
+  });
+}
+function parseOld(text){
+  if(!text) return [];
+  let lines=text.trim().split('\n');
+  if(lines.length<=1) return [];
+  return lines.slice(1).map(l=>{
+    let p=l.split(',');
+    return {time:p[0]||'', symbol:p[1]||'', type:p[2]||'', strike:p[3]||'', entry:p[4]||'', exit:p[5]||'', qty:p[6]||'', pnl:parseFloat(p[7])||0, balance:parseFloat(p[9]||0), trail:p[15]||'', raw:l};
+  }).filter(r=>!isNaN(r.pnl));
+}
+function render(){
+  const tbody=document.getElementById('tradeTable');
+  tbody.innerHTML='<tr><th>Time</th><th>ID</th><th>Bias</th><th>Spot</th><th>Trend Hi/Lo</th><th>Fib 0.32/0.5/2.14</th><th>W Pattern</th><th>Status</th><th>Reason</th></tr>';
+  const oldTbody=document.getElementById('oldTable');
+  oldTbody.innerHTML='<tr><th>Time</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Balance</th><th>TrailSL</th></tr>';
+  let awaitCount=0, okCount=0, skipCount=0, balances=[], labels=[];
+  if(allPaperRows.length>0){
+    allPaperRows.forEach((r,i)=>{
+      let badgeClass = r.status.includes('AWAIT') ? 'badge-wait' : r.status.includes('APPROVED') || r.status.includes('CLOSED') ? 'badge-ok' : 'badge-skip';
+      if(r.status.includes('AWAIT')) awaitCount++; else if(r.status.includes('APPROVED')||r.status.includes('CLOSED')) okCount++; else skipCount++;
+      balances.push(r.pnl||okCount); labels.push(r.id.slice(-4)||i+1);
+      let tr=document.createElement('tr');
+      tr.innerHTML=`<td>${(r.time||'').slice(11,19)}</td><td>${r.id}</td><td><b>${r.dir}</b></td><td>${r.spot}</td><td>${r.trend_hi}/${r.trend_lo}</td><td>${r.f32}/${r.f50}/${r.f214}</td><td>${r.w_pat}</td><td><span class="badge ${badgeClass}">${r.status}</span></td><td>${r.reason}</td>`;
+      tbody.appendChild(tr);
+    });
+    document.getElementById('count').innerText=allPaperRows.length;
+    document.getElementById('wins').innerText=okCount;
+    document.getElementById('loss').innerText=skipCount;
+    document.getElementById('await').innerText=awaitCount;
+    document.getElementById('total').innerText=okCount+' Approved';
+  }else{
+    tbody.innerHTML+='<tr><td colspan=9 style="color:#94a3b8">No paper signals yet - 9:15 nantar signal yeil. Manual upload var file select karu shakta.</td></tr>';
+  }
+  let oldTotal=0;
+  if(allOldRows.length>0){
+    allOldRows.forEach((r,i)=>{
+      oldTotal+=r.pnl;
+      let tr=document.createElement('tr');
+      tr.innerHTML=`<td>${r.time}</td><td>${r.symbol}</td><td>${r.type}</td><td>${r.strike}</td><td>${r.entry}</td><td>${r.exit}</td><td class="${r.pnl>=0?'profit':'loss'}">${r.pnl}</td><td>${r.balance||oldTotal.toFixed(2)}</td><td>${r.trail||''}</td>`;
+      oldTbody.appendChild(tr);
+      if(allPaperRows.length==0){ balances.push(r.balance||oldTotal); labels.push(i+1); }
+    });
+    if(allPaperRows.length==0){
+      document.getElementById('total').innerText='Rs.'+oldTotal.toFixed(2);
+      document.getElementById('total').className='big '+(oldTotal>=0?'profit':'loss');
+    }
+    currentPnL=oldTotal;
+  }
+  if(chartInstance) chartInstance.destroy();
+  chartInstance=new Chart(document.getElementById('pnlChart'), {
+    type: 'line',
+    data: {labels: labels, datasets: [{label: 'P&L / Progress', data: balances, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.2)', tension: 0.3, fill: true}]},
+    options: {plugins:{legend:{labels:{color:'white'}}}, scales:{x:{ticks:{color:'white'}}, y:{ticks:{color:'white'}}}}
+  });
+}
+async function initAuto(){
+  let paperText=await loadCSVAuto('paper_signals.csv');
+  let oldText=await loadCSVAuto('trades_log.csv');
+  let pnlText=await loadCSVAuto('pnl_today.txt');
+  let info=[];
+  if(paperText){ allPaperRows=parsePaper(paperText); info.push(`paper_signals.csv: ${allPaperRows.length}`); }
+  if(oldText){ allOldRows=parseOld(oldText); info.push(`trades_log.csv: ${allOldRows.length}`); }
+  if(pnlText && !isNaN(parseFloat(pnlText))){ currentPnL=parseFloat(pnlText); info.push(`pnl_today.txt: Rs.${pnlText.trim()}`); }
+  document.getElementById('fileinfo').innerText=info.length? info.join(' | ') : 'No auto-load (Chrome file:// block) - Use manual upload above';
+  render();
+}
+function handleFiles(files){
+  for(let file of files){
+    let reader=new FileReader();
+    reader.onload=function(e){
+      let text=e.target.result;
+      if(file.name.includes('paper')) allPaperRows=parsePaper(text);
+      else if(file.name.includes('trades')) allOldRows=parseOld(text);
+      else if(file.name.includes('pnl')) currentPnL=parseFloat(text)||0;
+      else {
+        if(text.includes('timestamp,signal_id')) allPaperRows=parsePaper(text);
+        else allOldRows=parseOld(text);
+      }
+      document.getElementById('fileinfo').innerText=`Manual loaded: ${file.name}`;
+      render();
+    };
+    reader.readAsText(file);
+  }
+}
+function downloadCSV(){
+  let csv="Time,ID,Bias,Spot,TrendHi,TrendLo,Fib032,Fib050,Fib214,W,Status,Reason,Strike,Type,Entry,Exit,PnL\n";
+  allPaperRows.forEach(r=>{ csv+=r.raw+"\n"; });
+  csv+="\n--- Old Trades ---\nTime,Symbol,Type,Strike,Entry,Exit,Qty,PnL,Reason,Balance,TrailSL\n";
+  allOldRows.forEach(r=>{ csv+=r.raw+"\n"; });
+  csv+=`\nTotal PnL,${currentPnL}\n`;
+  let blob=new Blob([csv], {type:'text/csv'});
+  let a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='NiftyBot_PnL_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
+}
+function downloadJSON(){
+  let data={date:new Date().toISOString(), totalPnL:currentPnL, paperSignals:allPaperRows, trades:allOldRows};
+  let blob=new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+  let a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='NiftyBot_Data_'+new Date().toISOString().slice(0,10)+'.json'; a.click();
+}
+function downloadPDF(){
+  let win=window.open('','_blank');
+  let html='<html><head><title>P&L Report</title><style>body{font-family:Arial;padding:20px} table{width:100%;border-collapse:collapse} th,td{border:1px solid #ccc;padding:6px;font-size:12px} .profit{color:green} .loss{color:red}</style></head><body>';
+  html+='<h1>NIFTY BOT PRO - TREND HIGH-LOW FIB + W Pattern</h1><p>Date: '+new Date().toLocaleString()+'</p><h2>Total P&L: Rs.'+currentPnL+'</h2>';
+  html+='<h3>Paper Signals ('+allPaperRows.length+')</h3><table><tr><th>Time</th><th>Bias</th><th>Trend Hi/Lo</th><th>Fib</th><th>Status</th></tr>';
+  allPaperRows.forEach(r=>{ html+=`<tr><td>${r.time}</td><td>${r.dir}</td><td>${r.trend_hi}/${r.trend_lo}</td><td>${r.f50}</td><td>${r.status}</td></tr>`; });
+  html+='</table><h3>Trades ('+allOldRows.length+')</h3><table><tr><th>Time</th><th>Type</th><th>Strike</th><th>PnL</th></tr>';
+  allOldRows.forEach(r=>{ html+=`<tr><td>${r.time}</td><td>${r.type}</td><td>${r.strike}</td><td class="${r.pnl>=0?'profit':'loss'}">${r.pnl}</td></tr>`; });
+  html+='</table></body></html>';
+  win.document.write(html); win.document.close(); win.print();
+}
+function clearData(){ if(confirm('Clear display only?')){ allPaperRows=[]; allOldRows=[]; currentPnL=0; render(); } }
+initAuto();
+setInterval(initAuto, 30000);
+</script>
+</body>
+</html>
