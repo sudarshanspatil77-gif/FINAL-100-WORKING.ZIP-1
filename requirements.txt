@@ -1,7 +1,0 @@
-smartapi-python
-pyotp
-requests
-pandas
-numpy
-flask
-gunicorn
