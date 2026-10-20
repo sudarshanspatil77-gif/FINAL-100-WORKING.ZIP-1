@@ -1,0 +1,104 @@
+//@version=6
+strategy("NIFTY Support/Resistance Reversal + Breakout Retest | EMA20 + Fib", overlay=true, pyramiding=0, initial_capital=100000, commission_type=strategy.commission.percent, commission_value=0.05, process_orders_on_close=true)
+
+emaLen = input.int(20, "EMA Length", minval=1)
+srLen = input.int(20, "Support/Resistance Lookback", minval=5)
+volLen = input.int(20, "Volume SMA Length", minval=1)
+volMult = input.float(1.0, "Volume confirmation multiplier", minval=0.1, step=0.1)
+atrLen = input.int(14, "ATR Length", minval=1)
+riskReward = input.float(2.0, "Risk:Reward target", minval=1.0, step=0.25)
+useFibTarget = input.bool(true, "Use Fibonacci extension target")
+fibExtension = input.float(1.272, "Fib extension (1.272 or 1.618)", minval=1.0, maxval=2.0, step=0.001)
+trailAtrMult = input.float(1.5, "ATR trailing multiplier", minval=0.1, step=0.1)
+useSession = input.bool(true, "Use NSE session filter")
+sessionInput = input.session("0920-1510", "Entry session (exchange time)")
+
+ema20 = ta.ema(close, emaLen)
+atr = ta.atr(atrLen)
+volAvg = ta.sma(volume, volLen)
+support = ta.lowest(low, srLen)[1]
+resistance = ta.highest(high, srLen)[1]
+inSession = not useSession or not na(time(timeframe.period, sessionInput))
+volOK = not na(volAvg) and volume >= volAvg * volMult
+bullish = close > open
+bearish = close < open
+
+// Long: support rejection or resistance breakout followed by retest.
+supportReversal = low <= support + 0.25 * atr and close > support and bullish and close > ema20 and volOK
+breakoutRetest = close[1] > resistance[1] and low <= resistance + 0.20 * atr and close > resistance and bullish and close > ema20 and volOK
+longSignal = barstate.isconfirmed and inSession and (supportReversal or breakoutRetest) and strategy.position_size == 0
+
+// Short signal on the index chart represents a PUT-buy setup, not option selling.
+resistanceReversal = high >= resistance - 0.25 * atr and close < resistance and bearish and close < ema20 and volOK
+breakdownRetest = close[1] < support[1] and high >= support - 0.20 * atr and close < support and bearish and close < ema20 and volOK
+shortSignal = barstate.isconfirmed and inSession and (resistanceReversal or breakdownRetest) and strategy.position_size == 0
+
+var float longStop = na
+var float longTarget = na
+var float longHighWater = na
+var float shortStop = na
+var float shortTarget = na
+var float shortLowWater = na
+var string lastSignalId = ""
+longId = str.tostring(time) + (supportReversal ? "_SUPPORT" : "_RETEST")
+shortId = str.tostring(time) + (resistanceReversal ? "_RESIST" : "_BREAKDOWN")
+
+if longSignal and longId != lastSignalId
+    swingLow = ta.lowest(low, 6)
+    candidateSL = math.min(swingLow, support) - 0.05 * atr
+    risk = close - candidateSL
+    fibRange = math.max(resistance - support, atr)
+    fibTarget = resistance + fibRange * (fibExtension - 1.0)
+    rrTarget = close + risk * riskReward
+    if risk > syminfo.mintick and risk <= close * 0.025
+        longStop := candidateSL
+        longTarget := useFibTarget ? math.max(rrTarget, fibTarget) : rrTarget
+        longHighWater := close
+        lastSignalId := longId
+        strategy.entry("CALL-BUY", strategy.long, comment=supportReversal ? "Support Reversal CE" : "Breakout Retest CE")
+
+if shortSignal and shortId != lastSignalId
+    swingHigh = ta.highest(high, 6)
+    candidateSL = math.max(swingHigh, resistance) + 0.05 * atr
+    risk = candidateSL - close
+    fibRange = math.max(resistance - support, atr)
+    fibTarget = support - fibRange * (fibExtension - 1.0)
+    rrTarget = close - risk * riskReward
+    if risk > syminfo.mintick and risk <= close * 0.025
+        shortStop := candidateSL
+        shortTarget := useFibTarget ? math.min(rrTarget, fibTarget) : rrTarget
+        shortLowWater := close
+        lastSignalId := shortId
+        strategy.entry("PUT-BUY", strategy.short, comment=resistanceReversal ? "Resistance Reversal PE" : "Breakdown Retest PE")
+
+if strategy.position_size > 0
+    longHighWater := math.max(nz(longHighWater, high), high)
+    longStop := math.max(nz(longStop, close - atr * trailAtrMult), longHighWater - atr * trailAtrMult)
+    strategy.exit("CALL-EXIT", "CALL-BUY", stop=longStop, limit=longTarget)
+if strategy.position_size < 0
+    shortLowWater := math.min(nz(shortLowWater, low), low)
+    shortStop := math.min(nz(shortStop, close + atr * trailAtrMult), shortLowWater + atr * trailAtrMult)
+    strategy.exit("PUT-EXIT", "PUT-BUY", stop=shortStop, limit=shortTarget)
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    longStop := na
+    longTarget := na
+    longHighWater := na
+    shortStop := na
+    shortTarget := na
+    shortLowWater := na
+
+plot(ema20, "EMA 20", color=color.white, linewidth=2)
+plot(support, "Support (prior range low)", color=color.blue, linewidth=2, style=plot.style_linebr)
+plot(resistance, "Resistance (prior range high)", color=color.red, linewidth=2, style=plot.style_linebr)
+plot(strategy.position_size > 0 ? longStop : strategy.position_size < 0 ? shortStop : na, "Trailing SL", color=color.orange, linewidth=2, style=plot.style_linebr)
+plot(strategy.position_size > 0 ? longTarget : strategy.position_size < 0 ? shortTarget : na, "Target", color=color.lime, linewidth=2, style=plot.style_linebr)
+plotshape(longSignal and supportReversal, title="Support Reversal CE", style=shape.labelup, location=location.belowbar, color=color.teal, text="SUP REV CE", textcolor=color.white, size=size.tiny)
+plotshape(longSignal and not supportReversal and breakoutRetest, title="Breakout Retest CE", style=shape.labelup, location=location.belowbar, color=color.green, text="RETEST CE", textcolor=color.white, size=size.tiny)
+plotshape(shortSignal and resistanceReversal, title="Resistance Reversal PE", style=shape.labeldown, location=location.abovebar, color=color.maroon, text="RES REV PE", textcolor=color.white, size=size.tiny)
+plotshape(shortSignal and not resistanceReversal and breakdownRetest, title="Breakdown Retest PE", style=shape.labeldown, location=location.abovebar, color=color.red, text="RETEST PE", textcolor=color.white, size=size.tiny)
+
+alertcondition(longSignal and supportReversal, title="NIFTY Support Reversal CE BUY", message="Support reversal CE setup on {{ticker}} {{interval}}. Close={{close}}")
+alertcondition(longSignal and breakoutRetest, title="NIFTY Breakout Retest CE BUY", message="Breakout retest CE setup on {{ticker}} {{interval}}. Close={{close}}")
+alertcondition(shortSignal and resistanceReversal, title="NIFTY Resistance Reversal PE BUY", message="Resistance rejection PE setup on {{ticker}} {{interval}}. Close={{close}}")
+alertcondition(shortSignal and breakdownRetest, title="NIFTY Breakdown Retest PE BUY", message="Breakdown retest PE setup on {{ticker}} {{interval}}. Close={{close}}")

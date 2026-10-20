@@ -1,22 +1,22 @@
 services:
   - type: web
-    name: nifty-bot-final
-    env: python
+    name: nifty-bot-support-reversal
+    runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:10000 --workers 1 --timeout 120
-    plan: free
+    startCommand: gunicorn app:app --workers 1 --threads 4 --timeout 120
+    healthCheckPath: /health
     envVars:
-      - key: ANGEL_API_KEY
-        sync: false
-      - key: ANGEL_CLIENT_ID
-        sync: false
-      - key: ANGEL_PASSWORD
-        sync: false
-      - key: ANGEL_TOTP_SECRET
-        sync: false
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TELEGRAM_CHAT_ID
-        sync: false
-      - key: PORT
-        value: 10000
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: LIVE_TRADING_ENABLED
+        value: "false"
+      - key: TIMEFRAME_MIN
+        value: "5"
+      - key: RISK_PERCENT
+        value: "0.5"
+      - key: RISK_REWARD
+        value: "2.0"
+      - key: MAX_TRADES_PER_DAY
+        value: "3"
+      - key: DAILY_LOSS_LIMIT_PERCENT
+        value: "1.5"
