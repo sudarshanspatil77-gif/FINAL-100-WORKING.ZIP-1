@@ -20,8 +20,13 @@ load_dotenv()
 TZ = ZoneInfo("Asia/Kolkata")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("niftybot")
+# सर्व्हर सुरू होताच लगेच Telegram टेस्ट मेसेज पाठवण्यासाठी:
+try:
+    send_telegram_msg("🤖 System Check: Bot & Telegram Connected Successfully!")
+except Exception as e:
+    print(f"Telegram Init Error: {e}")
+
 if __name__ == '__main__':
-    send_telegram_msg("🤖 System Check: Telegram Notifications are Working!")
     app.run(host='0.0.0.0', port=port)
 
 LIVE = os.getenv("LIVE_TRADING_ENABLED", "false").lower() == "true"
