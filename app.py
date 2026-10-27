@@ -20,7 +20,9 @@ load_dotenv()
 TZ = ZoneInfo("Asia/Kolkata")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("niftybot")
-app = Flask(__name__)
+if __name__ == '__main__':
+    send_telegram_msg("🤖 System Check: Telegram Notifications are Working!")
+    app.run(host='0.0.0.0', port=port)
 
 LIVE = os.getenv("LIVE_TRADING_ENABLED", "false").lower() == "true"
 PAPER = not LIVE
